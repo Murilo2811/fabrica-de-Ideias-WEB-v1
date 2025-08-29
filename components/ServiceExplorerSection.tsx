@@ -1,14 +1,22 @@
 
-import React, { useState, useMemo, forwardRef, useEffect } from 'react';
+import React, { useState, useMemo, forwardRef } from 'react';
 import type { Service, ServiceStatus } from '../types';
 import Section from './Section';
 import { mapBusinessModel, businessModelCategories } from '../utils/businessModelMapper';
 import Modal from './Modal';
 import { clusterData } from '../data/clusterData';
 import { useServices } from '../contexts/ServicesContext';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 
 interface ServiceExplorerSectionProps {}
+
+interface Filters {
+  type: string;
+  value: string;
+  classification: string;
+  status: string;
+}
 
 const getClassificationText = (score: number) => {
   if (score >= 21) return 'Altíssima';
@@ -101,7 +109,7 @@ const EditServiceModal: React.FC<{
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (service && isOpen) {
       setFormData(service);
       setError(null);
@@ -226,46 +234,47 @@ const EditServiceModal: React.FC<{
 
 const ServiceExplorerSection = forwardRef<HTMLElement, ServiceExplorerSectionProps>((props, ref) => {
   const { services, deleteService, updateService, downloadCSV } = useServices();
-  const [filterType, setFilterType] = useState('all');
-  const [filterValue, setFilterValue] = useState('');
-  const [filterClassification, setFilterClassification] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filters, setFilters] = useLocalStorage<Filters>('serviceExplorerFilters', {
+    type: 'all',
+    value: '',
+    classification: 'all',
+    status: 'all',
+  });
   const [editingService, setEditingService] = useState<Service | null>(null);
   
   const filterOptions = useMemo(() => {
-    if (filterType === 'cluster') return [...new Set(services.map(s => s.cluster))].sort();
-    if (filterType === 'businessModel') return businessModelCategories;
+    if (filters.type === 'cluster') return [...new Set(services.map(s => s.cluster))].sort();
+    if (filters.type === 'businessModel') return businessModelCategories;
     return [];
-  }, [filterType, services]);
+  }, [filters.type, services]);
 
   const filteredServices = useMemo(() => {
     return services.filter(service => {
-      if (filterType === 'cluster' && filterValue && service.cluster !== filterValue) return false;
-      if (filterType === 'businessModel' && filterValue && mapBusinessModel(service.businessModel) !== filterValue) return false;
+      if (filters.type === 'cluster' && filters.value && service.cluster !== filters.value) return false;
+      if (filters.type === 'businessModel' && filters.value && mapBusinessModel(service.businessModel) !== filters.value) return false;
       
-      if (filterClassification !== 'all') {
+      if (filters.classification !== 'all') {
         const totalScore = service.scores.reduce((a, b) => a + b, 0);
-        if (getClassificationText(totalScore) !== filterClassification) return false;
+        if (getClassificationText(totalScore) !== filters.classification) return false;
       }
 
-      if (filterStatus !== 'all') {
+      if (filters.status !== 'all') {
         const serviceStatus = service.status || 'avaliação';
-        if (serviceStatus !== filterStatus) return false;
+        if (serviceStatus !== filters.status) return false;
       }
       return true;
     }).sort((a,b) => b.id - a.id); // Sort by most recent
-  }, [services, filterType, filterValue, filterClassification, filterStatus]);
+  }, [services, filters]);
 
   const handleFilterTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value;
-    setFilterType(newType);
     if (newType === 'all') {
-      setFilterValue('');
+      setFilters({ ...filters, type: newType, value: '' });
     } else {
       const options = newType === 'cluster' 
         ? [...new Set(services.map(s => s.cluster))].sort() 
         : businessModelCategories;
-      setFilterValue(options[0] || '');
+      setFilters({ ...filters, type: newType, value: options[0] || '' });
     }
   };
 
@@ -284,21 +293,21 @@ const ServiceExplorerSection = forwardRef<HTMLElement, ServiceExplorerSectionPro
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
                 <div>
                     <label htmlFor="filter-type" className="block text-sm font-medium text-gray-700">Agrupar por:</label>
-                    <select id="filter-type" value={filterType} onChange={handleFilterTypeChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white">
+                    <select id="filter-type" value={filters.type} onChange={handleFilterTypeChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white">
                     <option value="all">Todos os Serviços</option>
                     <option value="cluster">Cluster</option>
                     <option value="businessModel">Modelo de Negócio</option>
                     </select>
                 </div>
-                <div className={filterType === 'all' ? 'hidden' : ''}>
+                <div className={filters.type === 'all' ? 'hidden' : ''}>
                     <label htmlFor="filter-value" className="block text-sm font-medium text-gray-700">Filtrar por:</label>
-                    <select id="filter-value" value={filterValue} onChange={e => setFilterValue(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white" disabled={!filterValue}>
+                    <select id="filter-value" value={filters.value} onChange={e => setFilters({...filters, value: e.target.value})} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white" disabled={!filters.value}>
                     {filterOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                     </select>
                 </div>
                 <div>
                     <label htmlFor="filter-classification" className="block text-sm font-medium text-gray-700">Classificação:</label>
-                    <select id="filter-classification" value={filterClassification} onChange={e => setFilterClassification(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white">
+                    <select id="filter-classification" value={filters.classification} onChange={e => setFilters({...filters, classification: e.target.value})} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white">
                     <option value="all">Todas</option>
                     <option value="Altíssima">Altíssima</option>
                     <option value="Alta">Alta</option>
@@ -308,7 +317,7 @@ const ServiceExplorerSection = forwardRef<HTMLElement, ServiceExplorerSectionPro
                 </div>
                 <div>
                     <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700">Status:</label>
-                    <select id="filter-status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white">
+                    <select id="filter-status" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-mid-blue focus:border-brand-mid-blue sm:text-sm rounded-md shadow-sm bg-white">
                     <option value="all">Todos</option>
                     {statusOptions.map(s => <option key={s} value={s}>{statusDisplayMap[s]}</option>)}
                     </select>

@@ -1,6 +1,14 @@
+
+import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Service, AIGeneratedIdea, GroundingChunk } from '../types';
 import { businessModelCategories } from "../utils/businessModelMapper";
-import { apiRequest } from './googleSheetService'; // A função de request agora é central
+import { clusterData } from '../data/clusterData';
+
+if (!process.env.API_KEY) {
+  console.error("API_KEY environment variable not set.");
+}
+
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
 export const getAIGeneratedIdeaDetails = async (idea: string): Promise<AIGeneratedIdea> => {
   const criteriaSummary = `
@@ -8,12 +16,46 @@ export const getAIGeneratedIdeaDetails = async (idea: string): Promise<AIGenerat
       2.  **Impacto no Faturamento:** A ideia deve ter potencial de receita recorrente, aumentar o valor das transações e ser rentável.
       3.  **Alinhamento com a Marca Fast Shop:** A ideia deve ser premium, inovadora e facilitar a vida do cliente.
   `;
-  
-  return apiRequest<AIGeneratedIdea>('getAIGeneratedIdeaDetails', {
-    idea,
-    criteriaSummary,
-    businessModelCategories
+  const prompt = `
+      Aja como um "Consultor de Inovação e Estratégia de Negócios" da Fast Shop. Sua tarefa é analisar uma nova ideia de serviço e refiná-la com base nos seguintes critérios estratégicos da empresa:
+      ${criteriaSummary}
+
+      Para a ideia de serviço fornecida, gere três sugestões concisas e orientadas para o mercado.
+
+      Ideia de Serviço: "${idea}"
+
+      Responda APENAS com um objeto JSON válido.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          beneficio: {
+            type: Type.STRING,
+            description: "Descreva o benefício principal para o cliente, focando em como a ideia resolve uma dor real e cria valor (Critério 1).",
+          },
+          publico: {
+            type: Type.STRING,
+            description: "Identifique o público-alvo mais relevante para esta oferta premium.",
+          },
+          modelo: {
+            type: Type.STRING,
+            enum: businessModelCategories,
+            description: `Escolha o modelo de negócio MAIS APROPRIADO da lista, pensando no potencial de faturamento e rentabilidade (Critério 2).`,
+          },
+        },
+        required: ["beneficio", "publico", "modelo"]
+      }
+    }
   });
+
+  const jsonText = response.text.trim();
+  return JSON.parse(jsonText);
 };
 
 
@@ -46,9 +88,51 @@ export const getAIRanking = async (services: Service[]): Promise<{ id: number; s
     *   **Alavancagem dos Atributos da Marca:** O serviço capitaliza os pontos fortes da Fast Shop, como a "Confiança", "Curadoria", "Atendimento e experiência em todos os pontos de contato" e a "Integração Omnichannel", de maneira que os concorrentes teriam dificuldade em replicar?
     *   **Defensibilidade no Mercado:** O serviço cria barreiras de entrada para a concorrência, protegendo a posição da Fast Shop como líder?
 `;
-    return apiRequest<{ id: number; scores: number[]; }[]>('getAIRanking', { services, criteria });
+    const prompt = `Você é um analista de negócios sênior da Fast Shop. Sua tarefa é analisar e priorizar uma lista de novas ideias de serviço. Para cada ideia, você deve:
+1. Atribuir uma nota de 0 a 5 para cada um dos 5 critérios de priorização a seguir.
+
+Seja rigoroso e consistente em sua avaliação.\n\n# Critérios de Priorização:\n${criteria}\n\n# Lista de Ideias de Serviço (JSON):\n${JSON.stringify(services.map(s => ({id: s.id, service: s.service, need: s.need, cluster: s.cluster})))}\n\n# Formato da Resposta:\nResponda APENAS com um array JSON válido.`;
+    
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        id: { type: Type.INTEGER },
+                        scores: {
+                            type: Type.ARRAY,
+                            items: { type: Type.INTEGER, minimum: 0, maximum: 5 }
+                        }
+                    },
+                    required: ["id", "scores"]
+                }
+            }
+        }
+    });
+
+    const jsonText = response.text.trim();
+    return JSON.parse(jsonText);
 };
 
 export const getAIInsight = async (userQuery: string, services: Service[]): Promise<{text: string; groundingChunks: GroundingChunk[]}> => {
-  return apiRequest<{text: string; groundingChunks: GroundingChunk[]}>('getAIInsight', { userQuery, services });
+  const context = JSON.stringify(services.slice(0, 15)); // Limit context to avoid overly large prompts
+  const prompt = `Você é um assistente de IA especialista em análise de negócios e portfólio de serviços. Responda à pergunta do usuário com base nos dados fornecidos e no seu conhecimento geral sobre estratégia de negócios. Se a pergunta for sobre informações atuais ou tendências de mercado, use a busca para fundamentar sua resposta. Formate sua resposta usando Markdown (use **negrito** para destacar termos importantes e listas com * ou - quando apropriado). Seja conciso e direto.\n\n# Dados do Portfólio (Amostra):\n${context}\n\n# Pergunta do Usuário:\n"${userQuery}"`;
+
+  const response: GenerateContentResponse = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        tools: [{googleSearch: {}}],
+      }
+  });
+
+  const text = response.text;
+  const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  
+  return { text, groundingChunks: groundingChunks as GroundingChunk[] };
 };

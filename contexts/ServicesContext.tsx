@@ -1,10 +1,12 @@
 
 import React, { createContext, useState, useCallback, useEffect, useContext, ReactNode } from 'react';
-import type { Service } from '../types';
+import type { Service, ParsedError } from '../types';
 import { getServices, addServiceToSheet, updateServiceInSheet, deleteServiceFromSheet, bulkUpdateServicesInSheet, WEB_APP_URL } from '../services/googleSheetService';
 import { getAIRanking } from '../services/geminiService';
 import { criteriaData } from '../data/criteriaData';
 import { mapBusinessModel } from '../utils/businessModelMapper';
+import { parseApiError } from '../utils/errorHandler';
+
 
 type NotificationType = 'success' | 'error' | 'info';
 
@@ -20,7 +22,7 @@ interface ServicesContextType {
   isRanking: boolean;
   isRefreshing: boolean;
   loadingMessage: string;
-  appError: string | null;
+  appError: ParsedError | null;
   notification: NotificationState | null;
 
   addService: (service: Omit<Service, 'id' | 'creationDate' | 'scores' | 'revenueEstimate'>) => Promise<void>;
@@ -39,7 +41,7 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [isRanking, setIsRanking] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Conectando ao banco de ideias...');
-  const [appError, setAppError] = useState<string | null>(null);
+  const [appError, setAppError] = useState<ParsedError | null>(null);
   const [notification, setNotification] = useState<NotificationState | null>(null);
 
   const showNotification = (message: string, type: NotificationType = 'info') => {
@@ -63,7 +65,7 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
       setServices(sanitizedServices);
     } catch (err: any) {
       console.error("Failed to load data from sheet:", err);
-      setAppError(err.message || 'Ocorreu um erro desconhecido ao carregar os dados.');
+      setAppError(parseApiError(err));
     } finally {
       setIsLoading(false);
     }
@@ -153,7 +155,7 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
       const errorMessage = err instanceof Error ? err.message : "Ocorreu um erro ao realizar a análise ou salvar.";
       console.error("Error during AI analysis and saving:", err);
       showNotification(errorMessage, 'error');
-      setAppError(errorMessage);
+      setAppError(parseApiError(err));
     } finally {
       setIsRanking(false);
     }

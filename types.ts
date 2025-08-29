@@ -1,9 +1,4 @@
 
-export interface User {
-  name: string;
-  email: string;
-}
-
 export type ServiceStatus = 'avaliação' | 'aprovada' | 'cancelada' | 'finalizada';
 
 export interface Service {
@@ -38,4 +33,16 @@ export interface GroundingChunk {
     uri: string;
     title: string;
   };
+}
+
+export interface ParsedError {
+  title: string;
+  details: React.ReactNode;
+  troubleshootingSteps: React.ReactNode;
+}
+// Fix: Add User type definition to resolve import error.
+export interface User {
+  id: string;
+  name: string;
+  email: string;
 }

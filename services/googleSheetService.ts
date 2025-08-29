@@ -1,8 +1,21 @@
 import type { Service, AIGeneratedIdea, User } from '../types';
 
-// TODO: Substitua pela URL real do seu Web App do Google Apps Script.
-// Se esta URL não for alterada, o aplicativo usará dados de mock para demonstração.
-export const WEB_APP_URL: string = 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE';
+// ====================================================================================
+// PASSO CRÍTICO DE CONFIGURAÇÃO: INSIRA A URL DO SEU BACKEND AQUI
+// ====================================================================================
+// Para conectar o aplicativo à sua Planilha Google, substitua o valor abaixo
+// pela URL do seu Aplicativo Web do Google Apps Script que você copiou na etapa de implantação.
+//
+// Exemplo: 'https://script.google.com/macros/s/SUA_ID_UNICA_AQUI/exec'
+//
+// Se esta URL não for alterada, o aplicativo funcionará em MODO DE DEMONSTRAÇÃO com dados fictícios.
+export const WEB_APP_URL: string = 'https://script.google.com/macros/s/AKfycbxhnPlNOW1fd2jHtJkVFyLnavi_8Dm-0W5CNKzjMbq_9G-fCERVx54g_voglXPEGHxCqg/exec';
+
+// Fix: Add AuthResponse interface for authentication functions.
+interface AuthResponse {
+  user: User;
+  token: string;
+}
 
 // --- Funções de Mock para demonstração ---
 let mockServices: Service[] = [
@@ -12,55 +25,11 @@ let mockServices: Service[] = [
 ];
 let nextId = mockServices.reduce((max, s) => Math.max(max, s.id), 0) + 1;
 
-// Inicializa os usuários de mock com persistência no localStorage para uma melhor experiência de desenvolvimento.
-const MOCK_USERS_DB_KEY = 'mock_users_db';
-const initialMockUsers: (User & { passwordHash: string })[] = [
-    { name: 'Usuário Mock', email: 'test@test.com', passwordHash: 'hashedpassword' }
-];
-
-let mockUsers: (User & { passwordHash: string })[];
-
-try {
-    const storedUsers = localStorage.getItem(MOCK_USERS_DB_KEY);
-    if (storedUsers) {
-        mockUsers = JSON.parse(storedUsers);
-    } else {
-        mockUsers = initialMockUsers;
-        localStorage.setItem(MOCK_USERS_DB_KEY, JSON.stringify(mockUsers));
-    }
-} catch (e) {
-    console.error("Não foi possível inicializar os usuários de mock do localStorage", e);
-    mockUsers = initialMockUsers;
-}
-
-
 async function handleMockRequest(action: string, payload?: any): Promise<any> {
     return new Promise(resolve => {
         setTimeout(() => {
             try {
                 switch (action) {
-                    case 'registerUser': {
-                        const { name, email } = payload;
-                        if (mockUsers.find(u => u.email === email)) {
-                            throw new Error("Usuário com este email já existe.");
-                        }
-                        const newUser = { name, email, passwordHash: 'hashedpassword' };
-                        mockUsers.push(newUser);
-                        // Persiste a lista de usuários atualizada
-                        localStorage.setItem(MOCK_USERS_DB_KEY, JSON.stringify(mockUsers));
-                        resolve({ success: true, data: { user: { name, email }, token: 'mock-token-for-' + email } });
-                        break;
-                    }
-                    case 'loginUser': {
-                        const { email } = payload;
-                        const user = mockUsers.find(u => u.email === email);
-                        if (user) { // Nenhuma verificação de senha no mock
-                            resolve({ success: true, data: { user: { name: user.name, email: user.email }, token: 'mock-token-for-' + email } });
-                        } else {
-                            throw new Error("Credenciais inválidas.");
-                        }
-                        break;
-                    }
                     case 'getServices':
                         resolve({ success: true, data: [...mockServices] });
                         break;
@@ -102,6 +71,25 @@ async function handleMockRequest(action: string, payload?: any): Promise<any> {
                         resolve({ success: true, data: { text: `Esta é uma **análise simulada** sobre sua pergunta.`, groundingChunks: [] } });
                         break;
                     }
+                    // Fix: Add mock handlers for login and register to resolve missing exports.
+                    case 'loginUser': {
+                        const { email, password } = payload;
+                        if (email && password) {
+                            resolve({ success: true, data: { user: { id: '1', name: 'Mock User', email }, token: 'mock-jwt-token' } });
+                        } else {
+                            throw new Error('Email and password required.');
+                        }
+                        break;
+                    }
+                    case 'registerUser': {
+                         const { name, email, password } = payload;
+                         if (name && email && password) {
+                            resolve({ success: true, data: { user: { id: '2', name, email }, token: 'mock-jwt-token' } });
+                         } else {
+                            throw new Error('Name, email, and password required.');
+                         }
+                         break;
+                    }
                     default:
                         throw new Error(`Ação de mock desconhecida: ${action}`);
                 }
@@ -121,25 +109,13 @@ export async function apiRequest<T>(action: string, payload?: object): Promise<T
         throw new Error(mockResponse.error || 'Ocorreu um erro no mock da API.');
     }
 
-    const sessionStr = localStorage.getItem('session');
-    const token = sessionStr ? JSON.parse(sessionStr).token : null;
-    // FIX: Changed type of requestPayload to `any` to allow adding sessionToken property.
-    const requestPayload: any = { ...payload };
-
-    if (action !== 'loginUser' && action !== 'registerUser') {
-      if (!token) {
-        throw new Error("Tentativa de chamada de API protegida sem autenticação.");
-      }
-      requestPayload.sessionToken = token;
-    }
-
     try {
         const response = await fetch(WEB_APP_URL, {
             method: 'POST',
             mode: 'cors',
             redirect: 'follow',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action, payload: requestPayload }),
+            body: JSON.stringify({ action, payload }),
         });
 
         if (!response.ok) {
@@ -161,19 +137,6 @@ export async function apiRequest<T>(action: string, payload?: object): Promise<T
 
 
 // --- Funções de Serviço ---
-
-interface AuthResponse {
-  user: User;
-  token: string;
-}
-
-export const loginUser = (email: string, password: string): Promise<AuthResponse> => {
-    return apiRequest<AuthResponse>('loginUser', { email, password });
-};
-
-export const registerUser = (name: string, email: string, password: string): Promise<AuthResponse> => {
-    return apiRequest<AuthResponse>('registerUser', { name, email, password });
-};
 
 const serviceToSheetData = (service: Partial<Service>) => ({
     id: service.id,
@@ -198,3 +161,7 @@ export const addServiceToSheet = (service: Omit<Service, 'id' | 'creationDate' |
 export const updateServiceInSheet = (service: Service): Promise<Service> => apiRequest<Service>('updateService', { service: serviceToSheetData(service) });
 export const bulkUpdateServicesInSheet = (services: Service[]): Promise<{ updatedCount: number }> => apiRequest<{ updatedCount: number }>('bulkUpdateServices', { services: services.map(serviceToSheetData) });
 export const deleteServiceFromSheet = (id: number): Promise<{ id: number }> => apiRequest<{ id: number }>('deleteService', { id });
+
+// Fix: Export mock authentication functions to resolve missing export errors.
+export const loginUser = (email: string, password: string): Promise<AuthResponse> => apiRequest<AuthResponse>('loginUser', { email, password });
+export const registerUser = (name: string, email: string, password: string): Promise<AuthResponse> => apiRequest<AuthResponse>('registerUser', { name, email, password });
